@@ -1,3 +1,4 @@
+import { CONFIG } from "../config/constants.js";
 import { auth, db } from "../config/firebase.js";
 import { uploadToCloudinary } from "../utils/helpers.js";
 
@@ -5,15 +6,48 @@ export const handleLogin = async (request, reply) => {
   try {
     const { email, password } = request.body;
 
-    // NOTE: firebase-admin does not have signInWithEmailAndPassword.
-    // This typically happens on the client side.
-    // Returning dummy success for now.
+ const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CONFIG.FIREBASE_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          returnSecureToken: true,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return reply.code(401).send({
+        message: "Invalid credentials",
+      });
+    }
+
+    return reply.send({
+      accessToken: data.idToken,
+      refreshToken: data.refreshToken,
+      expiresIn: data.expiresIn,
+      uid: data.localId,
+    });
+
+    const userRecord = await db.collection("users").where("email", "==", email).where("password", "==", password).get();
+    if(userRecord.empty){
+      return reply.status(404).send({
+        success: false,
+        message: "User not found",
+      });
+    }
     return reply.status(200).send({
       success: true,
       message: "Login successful (mock)",
-      user: {
-        email,
-      },
+      user: userRecord.docs[0].data(),
+
     });
   } catch (error) {
     return reply.status(500).send({ success: false, error: error.message });
@@ -64,6 +98,7 @@ export const handleSignUp = async (request, reply) => {
       fullName,
       email,
       userType,
+      password,
       createdAt: new Date().toISOString(),
       status: userType === "doctor" ? "pending" : "active",
       speciality: speciality || null,

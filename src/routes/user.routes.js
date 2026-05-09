@@ -1,4 +1,5 @@
 import { handleLogin, handleSignUp, testUploadCertificate } from "../controllers/user.controller.js";
+import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import {
   loginValidation,
@@ -22,6 +23,18 @@ async function userRoutes(fastify, options) {
     "/test/uploadCertificate",
     testUploadCertificate
   );
+
+  fastify.get(
+    "/protected",
+    { preHandler: authMiddleware },
+    (request, reply) => {
+      reply.send({
+        message: "This is protected content",
+        user: request.user,
+      });
+    }
+  );
+
 }
 
 export default userRoutes;
