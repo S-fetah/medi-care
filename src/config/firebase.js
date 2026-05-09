@@ -3,10 +3,10 @@ import {     readFileSync } from "fs";
 import { join } from "path";
 import { CONFIG } from "./constants.js";
 
-const serviceAccount = JSON.parse(
+/* const serviceAccount = JSON.parse(
   readFileSync(join(process.cwd(), "serviceAccountKey.json"), "utf8")
 );
-
+ */
 admin.initializeApp({
   credential: admin.credential.cert({ 
     projectId: CONFIG.FIREBASE_PROJECT_ID,
