@@ -1,12 +1,13 @@
 import { CONFIG } from "../config/constants.js";
 import { auth, db } from "../config/firebase.js";
 import { uploadToCloudinary } from "../utils/helpers.js";
+import crypto from "crypto";
 
 export const handleLogin = async (request, reply) => {
   try {
     const { email, password } = request.body;
 
- const response = await fetch(
+    const response = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CONFIG.FIREBASE_API_KEY}`,
       {
         method: "POST",
@@ -29,60 +30,48 @@ export const handleLogin = async (request, reply) => {
       });
     }
 
-    return reply.send({
-      accessToken: data.idToken,
-      refreshToken: data.refreshToken,
-      expiresIn: data.expiresIn,
-      uid: data.localId,
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+
+    // ✅ correct Firestore usage
+    const sessionRef = await db.collection("sessions").add({
+      userId: data.localId,
+      accessToken: sessionToken,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
 
-    const userRecord = await db.collection("users").where("email", "==", email).where("password", "==", password).get();
-    if(userRecord.empty){
-      return reply.status(404).send({
+    // optional: verify creation
+    if (!sessionRef.id) {
+      return reply.code(500).send({
         success: false,
-        message: "User not found",
+        message: "Session creation failed",
       });
     }
-    return reply.status(200).send({
-      success: true,
-      message: "Login successful (mock)",
-      user: userRecord.docs[0].data(),
 
+    return reply.code(200).send({
+      success: true,
+      message: "Login successful",
+      accessToken: sessionToken,
+      userId: data.localId,
     });
+
   } catch (error) {
-    return reply.status(500).send({ success: false, error: error.message });
+    return reply.code(500).send({
+      success: false,
+      error: error.message,
+    });
   }
 };
 
 export const handleSignUp = async (request, reply) => {
   try {
-    const { fullName, email, password, userType, speciality } = request.body;
+    const { fullName, email, password, userType, speciality, certificateUrl } = request.body;
 
-    let certificateUrl = null;
-
-    if (userType === "doctor") {
-      const filePart = request.fileData;
- // Populated by validate middleware
-      if (!filePart) {
-        return reply.status(400).send({
-          success: false,
-          message: "Certificate is required for doctors",
-        });
-      }
-      // Handle file upload
-      const uploadResult = await uploadToCloudinary(
-        filePart.buffer,
-        filePart.mimetype === "application/pdf" ? "raw" : "auto"
-      );
-
-      if (!uploadResult.success) {
-        return reply.status(500).send({
-          success: false,
-          message: "Error uploading certificate",
-          error: uploadResult.error,
-        });
-      }
-      certificateUrl = uploadResult.url;
+    if (userType === "doctor" && (!certificateUrl || certificateUrl === "" || !String(certificateUrl).includes("https://res.cloudinary.com"))) {
+      return reply.status(400).send({
+        success: false,
+        message: "Certificate is required for doctors",
+      });
     }
 
     // 1. Create user in Firebase Auth
@@ -137,8 +126,6 @@ export const testUploadCertificate = async (request, reply) => {
       });
     }
 
-    console.log("Received file for test upload:", filePart.filename);
-    
     const uploadResult = await uploadToCloudinary(filePart.file, filePart.mimetype === "application/pdf" ? "raw" : "auto");
 
     if (!uploadResult.success) {
@@ -166,6 +153,181 @@ export const testUploadCertificate = async (request, reply) => {
   }
 };
 
+// get user details
+export const getUser = async (request, reply) => {
+  try {
+    const { uid } = request.user;
+    const userRecord = await db.collection("users").doc(uid).get();
 
+
+    if (!userRecord.exists) {
+      return reply.status(404).send({
+        success: false,
+        message: "User not found",
+      });
+    }
+    const {password , ...rest} = userRecord.data(); 
+    return reply.status(200).send({
+      success: true,
+      message: "User fetched successfully",
+      data: {...rest},
+    });
+  } catch (error) {
+    console.error("Get User Error:", error);
+    return reply.status(500).send({
+      success: false,
+      error: error.message || "An error occurred while fetching user",
+    });
+  }
+};
+
+
+export const getUserBookings = async (request, reply) => {
+try{
+  const { uid } = request.user;
+  
+  const bookings = await db.collection("bookings").where("userId", "==", uid).get();
+
+  if (bookings.empty) {
+    bookings = [];
+  }
+
+  const FileterdBookings = bookings.docs.map((doc) =>{
+    return doc.data();
+  });
+
+  return reply.status(200).send({
+    success: true,
+    message: "Bookings fetched successfully",
+    data: FileterdBookings,
+  });
+
+} catch(error) {
+
+  reply.status(500).send({
+    success: false,
+    error: error.message || "An error occurred while fetching user bookings",
+  });
+}
+
+}
+
+
+export const bookAppointment = async (request, reply) => {
+
+try {
+  const { appointmentId } = request.body;
+  const { uid } = request.user;
+
+  const appointment = await db.collection("appointments").doc(appointmentId).get();
+
+  if (!appointment.exists) {
+    return reply.status(404).send({
+      success: false,
+      message: "Appointment not found",
+    });
+  }
+
+  const bookingExits = await db.collection("bookings").where("appointmentId", "==", appointmentId).where("userId", "==", uid).get();
+  if(!bookingExits.empty){
+    return reply.status(400).send({
+      success: false,
+      message: "Booking already exists",
+    });
+  }
+  const booking = await db.collection("bookings").add({
+    appointmentId,
+    userId: uid,
+    createdAt: new Date().toISOString(),
+    status: "pending acceptence",
+    updatedAt: new Date().toISOString(),
+  });
+
+  return reply.status(200).send({
+    success: true,
+    message: "Appointment booked successfully",
+    data: booking,
+  });
+
+} catch(error) {
+  return reply.status(500).send({
+    success: false,
+    error: error.message || "An error occurred while booking appointment",
+  });
+}
+
+}
+
+// doctor operations
+export const getDoctors = async (request, reply) => {
+  try {
+    const doctors = await db.collection("users").where("userType", "==", "doctor").get();
+    if (doctors.empty) {
+      return reply.status(404).send({
+        success: false,
+        message: "No doctors found",
+      });
+    }
+
+    const FileterdDoctors = doctors.docs.map((doc) =>{
+
+      const {password , ...rest} = doc.data();
+      return rest
+    });
+     
+    return reply.status(200).send({
+      success: true,
+      message: "Doctors fetched successfully",
+      data: {FileterdDoctors},
+    });
+  } catch (error) {
+    console.error("Get Doctors Error:", error);
+    return reply.status(500).send({
+      success: false,
+      error: error.message || "An error occurred while fetching doctors",
+    });
+  }
+};
+
+export const completeBio = async (request, reply) => {
+  try {
+    const { uid } = request.user;
+    const { title, bio, specialities, certification, reviews } = request.body;
+
+    const details = {
+      title,
+      bio,
+      specialities,
+      certification,
+      reviews,
+    }
+    const userRecord = await db.collection("users").doc(uid).get();
+    if (!userRecord.exists) {
+      return reply.status(404).send({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if(userRecord.data().userType !== "doctor"){
+      return reply.status(403).send({
+        success: false,
+        message: "Only doctors can complete their bio",
+      });
+    }
+    await db.collection("users").doc(uid).update({ details, status: "active" });
+    return reply.status(200).send({
+      success: true,
+      message: "Details updated successfully",
+    });
+
+  } catch (error) {
+    console.error("Complete Bio Error:", error);
+    return reply.status(500).send({
+      success: false,
+      error: error.message || "An error occurred while completing details",
+    });
+  }
+};
 
 

@@ -1,4 +1,4 @@
-import { handleLogin, handleSignUp, testUploadCertificate } from "../controllers/user.controller.js";
+import {  bookAppointment, getUser, getUserBookings, handleLogin, handleSignUp } from "../controllers/user.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import {
@@ -7,6 +7,15 @@ import {
 } from "../validations/auth.validation.js";
 
 async function userRoutes(fastify, options) {
+
+  // user routes
+  fastify.get("/user", { preHandler: authMiddleware }, getUser)
+
+  fastify.get("/user/bookings", { preHandler: authMiddleware }, getUserBookings)
+
+  fastify.post("/user/bookings/book", { preHandler: authMiddleware }, bookAppointment)
+
+  // auth routes
   fastify.post(
     "/auth/login",
     { preHandler: validate(loginValidation, "body") },
@@ -17,13 +26,7 @@ async function userRoutes(fastify, options) {
     { preHandler: validate(signUpValidation, "file") },
     handleSignUp
   );
-
-  // Test endpoint for file upload to Cloudinary
-  fastify.post(
-    "/test/uploadCertificate",
-    testUploadCertificate
-  );
-
+  
   fastify.get(
     "/protected",
     { preHandler: authMiddleware },

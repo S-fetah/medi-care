@@ -20,3 +20,12 @@ export const signUpValidation = z.object({
     });
   }
 });
+
+
+export const doctorBioSchema = z.object({
+  title: z.string().min(10, "title have to be atleast 10 characters"),
+  bio: z.string().min(50, "bio have to be atleast 50 characters"),
+  specialities: z.array(z.string()).min(1, "specialities have to be atleast 1 characters"),
+  certification: z.array(z.string()).min(1, "certification have to be atleast 1 characters"),
+  reviews: z.array(z.string()).min(1, "reviews have to be atleast 1 characters").default([]),
+})
